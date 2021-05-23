@@ -1,0 +1,63 @@
+on: [push]
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+    
+    - uses: actions/checkout@master
+    
+    - uses: azure/login@v1
+      with:
+        creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+    - name: Create ACR
+      id: create-acr
+      run: |
+        az acr create -n saicontainerregistry -g saicontainerregistryacde-rg --location "East US" --sku Basic --admin-enabled
+        echo "::set-output name=acr_username::`az acr credential show -n saicontainerregistry --query username | xargs`"
+        echo "::set-output name=acr_password::`az acr credential show -n saicontainerregistry --query passwords[0].value | xargs`"
+        echo "::add-mask::`az acr credential show -n saicontainerregistry --query passwords[0].value | xargs`"
+
+    - uses: azure/docker-login@v1
+      with:
+        login-server: saicontainerregistry.azurecr.io
+        username: ${{ steps.create-acr.outputs.acr_username }}
+        password: ${{ steps.create-acr.outputs.acr_password }}
+
+    - name: Build and push image to ACR
+      id: build-image
+      run: |
+        docker build "$GITHUB_WORKSPACE/sai" -f  "Private" -t saicontainerregistry.azurecr.io/saikube:${{ github.sha }} --label dockerfile-path=Private
+        docker push saicontainerregistry.azurecr.io/saikube:${{ github.sha }}
+    
+    - uses: azure/k8s-set-context@v1
+      id: login
+      with:
+         kubeconfig: ${{ secrets.aks_saikube_kubeConfig }}
+    
+    - name: Create namespace
+      run: |
+        namespacePresent=`kubectl get namespace | grep saikubeb082 | wc -l`
+        if [ $namespacePresent -eq 0 ]
+        then
+            echo `kubectl create namespace saikubeb082`
+        fi
+
+    - uses: azure/k8s-create-secret@v1
+      with:
+        namespace: saikubeb082
+        container-registry-url: saicontainerregistry.azurecr.io
+        container-registry-username: ${{ steps.create-acr.outputs.acr_username }}
+        container-registry-password: ${{ steps.create-acr.outputs.acr_password }}
+        secret-name: saikubedockerauth
+       
+    - uses: azure/k8s-deploy@v1.2
+      with:
+        namespace: saikubeb082
+        manifests: |
+          manifests/deployment.yml
+          manifests/service.yml
+        images: |
+          saicontainerregistry.azurecr.io/saikube:${{ github.sha }}
+        imagepullsecrets: |
+          saikubedockerauth   
