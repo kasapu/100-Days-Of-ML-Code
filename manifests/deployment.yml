@@ -1,0 +1,19 @@
+apiVersion : apps/v1
+kind: Deployment
+metadata:
+  name: "saikube-3737"
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: "saikube-3737"
+  template:
+    metadata:
+      labels:
+        app: "saikube-3737"
+    spec:
+      containers:
+        - name: "saikube-3737"
+          image: "saicontainerregistry.azurecr.io/saikube"
+          ports:
+          - containerPort: 443
